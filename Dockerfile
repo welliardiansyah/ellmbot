@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-ENV BING_API_KEY=your_bing_api_key
+ENV TELEGRAM_BOT_TOKEN=7939254454:AAEhQNCUW6PJunraVtJ5HICB-DpJfmBMeTo
+ENV BING_API_KEY=04dc7865095c4d029369f8ebff18d43a
 ENV LOGGING_LEVEL=INFO
 ENV TTS_LANGUAGE=id
 
