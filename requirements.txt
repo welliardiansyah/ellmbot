@@ -5,4 +5,4 @@ phonenumbers==8.13.15
 truecallerpy==1.0.3
 aiogram==2.25.1
 Flask==2.2.5
-aiohttp==3.8.5
+aiohttp==3.10.2
