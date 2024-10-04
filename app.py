@@ -78,12 +78,17 @@ def calculate(expression: str) -> str:
         return "Maaf, saya tidak dapat menghitung itu. Pastikan input Anda benar."
 
 async def search_bing(query: str) -> str:
-    """Perform a Bing search."""
+    """Perform a Bing search with results in Indonesian."""
     api_key = os.getenv("BING_API_KEY")
     endpoint = "https://api.bing.microsoft.com/v7.0/search"
     
     headers = {"Ocp-Apim-Subscription-Key": api_key}
-    params = {"q": query, "textDecorations": True, "textFormat": "HTML"}
+    params = {
+        "q": query,
+        "textDecorations": True,
+        "textFormat": "HTML",
+        "setLang": "id"  # Set the language to Indonesian
+    }
 
     try:
         response = requests.get(endpoint, headers=headers, params=params)
