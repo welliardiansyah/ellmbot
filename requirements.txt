@@ -1,8 +1,8 @@
 requests==2.31.0
-instaloader==4.9.5
-pandas==1.3.5
-phonenumbers==8.13.15
-truecallerpy==1.0.3
-aiogram==2.25.1
-Flask==2.2.5
-aiohttp==3.8.5
+gtts==2.2.3
+python-telegram-bot==20.0
+fuzzywuzzy==0.18.0
+nltk==3.6.3
+beautifulsoup4==4.10.0
+sympy==1.10.1
+python-dotenv==0.21.0
