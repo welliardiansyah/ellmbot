@@ -1,4 +1,4 @@
-requests==2.31.0
+requests==2.32.2
 gtts==2.2.3
 python-telegram-bot==20.0
 fuzzywuzzy==0.18.0
