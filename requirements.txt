@@ -6,3 +6,5 @@ nltk==3.6.3
 beautifulsoup4==4.10.0
 sympy==1.10.1
 python-dotenv==0.21.0
+httpx
+scikit-learn

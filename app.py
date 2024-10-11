@@ -1,104 +1,92 @@
 import logging
 import os
 import json
-import random
 import httpx
 from gtts import gTTS
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
-from fuzzywuzzy import process
-from nltk.stem import PorterStemmer
 import re
 from bs4 import BeautifulSoup
-import sympy as sp
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
+import pickle
+import asyncio
+import random
 
 load_dotenv()
 
-WELCOME_TEXT = "Selamat datang! Kirim pesan untuk memulai pertanyaan."
-HELP_TEXT = "/start - Memulai percakapan\n/help - Menampilkan daftar perintah\n/about - Informasi tentang bot\n/feedback - Kirim feedback"
-ABOUT_TEXT = "Saya adalah bot yang belajar dari percakapan Anda untuk memberikan jawaban dan saran yang lebih baik!"
-FILTER_WORDS = ["kontol", "memek"]
+WELCOME_TEXT = "Selamat datang! Kirim pesan untuk memulai percakapan. 😊"
+HELP_TEXT = "/start - Memulai percakapan\n/help - Menampilkan daftar perintah\n/about - Informasi tentang bot\n/feedback - Kirim feedback\n/topics - Lihat topik yang sudah dibahas"
+ABOUT_BOT = "Saya adalah bot yang dirancang untuk membantu Anda dengan berbagai pertanyaan. 🤖"
+ABOUT_CREATOR = "Saya dibuat oleh Welli Ardiansyah."
+FILTER_WORDS_FILE = "filtered_words.json"
+RESPONSE_MODEL_FILE = "responses.json"
+TRAINING_DATA_FILE = "training_data.json"
 BING_API_KEY = os.getenv("BING_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-QA_MODEL_FILE = "qa_model.json"
-ADVICE_MODEL_FILE = "advice_model.json"
-FILTER_WORDS_FILE = "filtered_words.json"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def load_model(filename):
-    """Load model from a JSON file."""
-    if os.path.exists(filename):
-        with open(filename, "r", encoding='utf-8') as f:
-            return json.load(f)
+responses = {}
+filter_words = []
+user_context = {}
+training_data = []
+models = {}
+vectorizers = {}
+
+def load_responses():
+    if os.path.exists(RESPONSE_MODEL_FILE):
+        with open(RESPONSE_MODEL_FILE, "r", encoding='utf-8') as f:
+            data = f.read().strip()
+            if data:
+                return json.loads(data)
     return {}
 
-qa_model = load_model(QA_MODEL_FILE)
-advice_model = load_model(ADVICE_MODEL_FILE)
-filter_words = load_model(FILTER_WORDS_FILE)
-response_cache = {}
-ps = PorterStemmer()
+responses = load_responses()
+
+def load_filter_words():
+    if os.path.exists(FILTER_WORDS_FILE):
+        with open(FILTER_WORDS_FILE, "r", encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+filter_words = load_filter_words()
+
+def load_training_data():
+    if os.path.exists(TRAINING_DATA_FILE):
+        with open(TRAINING_DATA_FILE, "r", encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+training_data = load_training_data()
+
+def save_training_data():
+    with open(TRAINING_DATA_FILE, "w", encoding='utf-8') as f:
+        json.dump(training_data, f, ensure_ascii=False, indent=4)
 
 def contains_filtered_words(text: str) -> bool:
-    """Check if the text contains any filtered words."""
     return any(word in text for word in filter_words)
 
-async def save_model(filename, model):
-    """Save model to a JSON file asynchronously."""
-    with open(filename, "w", encoding='utf-8') as f:
-        json.dump(model, f, ensure_ascii=False, indent=4)
-
-async def add_filtered_word(word: str):
-    """Add a new word to the filtered words list."""
-    if word not in filter_words:
-        filter_words.append(word)
-        await save_model(FILTER_WORDS_FILE, filter_words)
-
-def calculate(expression: str) -> str:
-    """Calculate derivatives, integrals, or evaluate arithmetic expressions."""
+async def calculate(expression: str) -> str:
     try:
-        if "turun" in expression or "turunan" in expression:
-            func_str = re.search(r'fungsi (.+)', expression)
-            if not func_str:
-                return "Silakan berikan format yang benar, misalnya: 'turunan fungsi x^2'."
-            func_str = func_str.group(1).strip()
-            x = sp.symbols('x')
-            func = sp.sympify(func_str)
-            derivative = sp.diff(func, x)
-            return f"Turunan dari {func} adalah {derivative}"
-
-        elif "integral" in expression:
-            func_str = re.search(r'integral (.+)', expression)
-            if not func_str:
-                return "Silakan berikan format yang benar, misalnya: 'integral x^2'."
-            func_str = func_str.group(1).strip()
-            x = sp.symbols('x')
-            func = sp.sympify(func_str)
-            integral = sp.integrate(func, x)
-            return f"Integral dari {func} adalah {integral}"
-
-        # Evaluate basic arithmetic expressions
         expression = re.sub(r'[^\d+\-*/().]', '', expression)
         result = eval(expression)
         return str(result)
-
     except Exception as e:
-        logger.error(f"Error calculating expression: {e}")
+        logger.error(f"Kesalahan menghitung ekspresi: {e}")
         return "Maaf, saya tidak dapat menghitung itu. Pastikan input Anda benar."
 
-async def fetch_with_httpx(endpoint: str, params: dict, headers: dict) -> dict:
-    """Fetch data using httpx for asynchronous requests."""
-    async with httpx.AsyncClient() as client:
+async def fetch_with_httpx(endpoint: str, params: dict, headers: dict, timeout: int = 5) -> dict:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.get(endpoint, headers=headers, params=params)
         response.raise_for_status()
         return response.json()
 
 async def search_bing(query: str) -> str:
-    """Perform a Bing search with results in Indonesian."""
     endpoint = "https://api.bing.microsoft.com/v7.0/search"
-    
     headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
     params = {
         "q": query,
@@ -114,13 +102,14 @@ async def search_bing(query: str) -> str:
             raw_snippet = top_result["snippet"]
             cleaned_snippet = BeautifulSoup(raw_snippet, "html.parser").get_text()
             return cleaned_snippet
+    except httpx.ReadTimeout:
+        logger.error("Pencarian Bing memakan waktu terlalu lama.")
     except Exception as e:
-        logger.error(f"Bing search error: {e}")
+        logger.error(f"Kesalahan pencarian Bing: {e}")
     return None
 
 async def search_wikipedia(query: str) -> str:
-    """Perform a Wikipedia search."""
-    endpoint = "https://en.wikipedia.org/w/api.php"
+    endpoint = "https://id.wikipedia.org/w/api.php"
     params = {
         "action": "query",
         "list": "search",
@@ -137,145 +126,178 @@ async def search_wikipedia(query: str) -> str:
                 page_snippet = search_results["query"]["search"][0]["snippet"]
                 cleaned_snippet = BeautifulSoup(page_snippet, 'html.parser').get_text()
                 return cleaned_snippet
+    except httpx.ReadTimeout:
+        logger.error("Pencarian Wikipedia memakan waktu terlalu lama.")
     except Exception as e:
-        logger.error(f"Wikipedia search error: {e}")
+        logger.error(f"Kesalahan pencarian Wikipedia: {e}")
     return None
 
-def filter_response(text: str) -> str:
-    """Filter the response text for unwanted content."""
-    if contains_filtered_words(text):
-        return "Maaf, saya tidak dapat memberikan informasi tentang itu."
-    return text
+async def update_training_data(user_query: str, response: str):
+    training_data.append({"query": user_query, "response": response})
+    save_training_data()
 
-async def cached_search(query: str):
-    """Cache responses from Bing and Wikipedia."""
-    if query in response_cache:
-        return response_cache[query]
-    bing_response = await search_bing(query)
-    wiki_response = await search_wikipedia(query)
+async def train_model():
+    if training_data:
+        vectorizer = TfidfVectorizer()
+        X = vectorizer.fit_transform([data["query"] for data in training_data])
+        y = [data["response"] for data in training_data]
 
-    combined_response = bing_response or wiki_response
-    response_cache[query] = combined_response
-    return combined_response
+        models = {
+            'naive_bayes': MultinomialNB(),
+            'logistic_regression': LogisticRegression(max_iter=1000)
+        }
+        
+        for model_name, model in models.items():
+            model.fit(X, y)
+            with open(f"{model_name}.pkl", "wb") as model_file:
+                pickle.dump(model, model_file)
+            with open(f"{model_name}_vectorizer.pkl", "wb") as vector_file:
+                pickle.dump(vectorizer, vector_file)
 
-async def match_response(user_query: str):
-    """Match user query to a response from the QA model."""
-    result = process.extractOne(user_query, qa_model.keys(), score_cutoff=70)
-    if result:
-        best_match, _ = result
-        return best_match, random.choice(qa_model[best_match])
-    return None, None
+async def load_models():
+    global models, vectorizers
+    models = {}
+    vectorizers = {}
+    
+    for model_name in ['naive_bayes', 'logistic_regression']:
+        with open(f"{model_name}.pkl", "rb") as model_file:
+            models[model_name] = pickle.load(model_file)
+        with open(f"{model_name}_vectorizer.pkl", "rb") as vector_file:
+            vectorizers[model_name] = pickle.load(vector_file)
+
+def generate_follow_up_question(user_query: str) -> str:
+    if "apa" in user_query:
+        return "Bisa jelaskan lebih lanjut tentang apa yang Anda maksud?"
+    elif "kenapa" in user_query:
+        return "Apa yang membuat Anda penasaran tentang itu?"
+    elif "siapa" in user_query:
+        return "Apakah Anda merujuk kepada seseorang atau sesuatu yang spesifik?"
+    elif "bagaimana" in user_query:
+        return "Bagaimana perasaan Anda tentang itu?"
+    return ""
+
+def generate_topic_suggestions() -> list:
+    topics = [
+        "Kesehatan mental",
+        "Inovasi teknologi",
+        "Seni dan budaya",
+        "Perubahan iklim",
+        "Sejarah dunia",
+        "Pendidikan di era digital",
+        "Ekonomi global",
+        "Olahraga dan kebugaran",
+        "Wisata dan petualangan",
+        "Makanan dan kuliner",
+        "Kecerdasan buatan",
+        "Etika dalam teknologi",
+        "Tren mode saat ini",
+        "Masyarakat dan budaya",
+        "Literatur klasik"
+    ]
+    return random.sample(topics, 3)
+
+def generate_custom_topic_suggestions(user_preferences: list) -> list:
+    available_topics = [
+        "Kesehatan mental",
+        "Inovasi teknologi",
+        "Seni dan budaya",
+        "Perubahan iklim",
+        "Sejarah dunia",
+        "Pendidikan di era digital",
+        "Ekonomi global",
+        "Olahraga dan kebugaran",
+        "Wisata dan petualangan",
+        "Makanan dan kuliner",
+        "Kecerdasan buatan",
+        "Etika dalam teknologi",
+        "Tren mode saat ini",
+        "Masyarakat dan budaya",
+        "Literatur klasik"
+    ]
+    return random.sample([topic for topic in available_topics if topic in user_preferences], 3)
 
 async def handle_user_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle user queries."""
     user_query = update.message.text.lower().strip()
-    user_id = update.message.from_user.id
+    
+    if contains_filtered_words(user_query):
+        await update.message.reply_text("Maaf, saya tidak dapat memberikan informasi tentang itu.")
+        return
+
     response = None
 
-    user_query_count = context.user_data.setdefault(user_id, {})
-    
-    user_query_count[user_query] = user_query_count.get(user_query, 0) + 1
-
-    REPEAT_THRESHOLD = 2
-
-    if user_query_count[user_query] > REPEAT_THRESHOLD:
-        await update.message.reply_text("Sepertinya Anda telah bertanya tentang itu beberapa kali. Mungkin Anda ingin mencoba pertanyaan lain?")
-        return
-
-    best_match, response = await match_response(user_query)
-    if response:
-        await update.message.reply_text(response)
-        await send_voice_response(update, response)
+    if re.match(r'^[\d\s+\-*/().]+$', user_query):
+        response = await calculate(user_query)
+    elif "siapa kamu" in user_query or "apa itu" in user_query:
+        response = ABOUT_BOT
+    elif "siapa penciptamu" in user_query or "siapa yang membuatmu" in user_query:
+        response = ABOUT_CREATOR
+    elif "apa kabar" in user_query or "bagaimana kabarmu" in user_query:
+        response = "Saya baik-baik saja, terima kasih! Bagaimana dengan Anda?"
+    elif "cinta" in user_query or "suka" in user_query:
+        response = "Cinta adalah emosi yang mendalam. Apakah Anda memiliki pengalaman yang ingin dibagikan?"
+    elif "musik" in user_query:
+        response = "Musik adalah bagian penting dari budaya kita. Jenis musik apa yang Anda suka?"
+    elif "film" in user_query:
+        response = "Film bisa menjadi pengalaman yang menghibur. Apa film terakhir yang Anda tonton?"
+    elif "cuaca" in user_query:
+        response = "Cuaca bisa sangat berpengaruh pada suasana hati. Anda ingin tahu tentang cuaca di mana?"
+    elif "makanan" in user_query:
+        response = "Makanan adalah bagian penting dari kehidupan. Apa makanan favorit Anda?"
+    elif "teknologi" in user_query:
+        response = "Teknologi terus berkembang. Apa yang terbaru yang Anda dengar?"
     else:
-        await handle_no_response(update, context, user_query)
+        bing_response = await search_bing(user_query)
+        wiki_response = await search_wikipedia(user_query)
+        response = bing_response or wiki_response
 
-async def handle_no_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_query: str):
-    """Handle cases where no direct response is found."""
-    if re.match(r'^[\d\s\+\-\*/().]+$|turun|integral', user_query):
-        response = calculate(user_query)
-        await update.message.reply_text(response)
-        await send_voice_response(update, response)
-        return
+        if response:
+            await update_training_data(user_query, response)
+            await train_model()  # Train the model with new data
+        else:
+            response = "Maaf, saya tidak tahu jawaban untuk itu. Bisakah Anda memberi tahu saya lebih lanjut?"
 
-    response = await cached_search(user_query)
-    if response:
-        filtered_response = filter_response(response)
-        await update.message.reply_text(filtered_response)
-        await send_voice_response(update, filtered_response)
+    await update.message.reply_text(f"\n{response}")
+    follow_up_question = generate_follow_up_question(user_query)
+    if follow_up_question:
+        await update.message.reply_text(follow_up_question)
+
+    # Get user preferences from context
+    user_preferences = context.user_data.get('preferences', [])
+    if user_preferences:
+        topic_suggestions = generate_custom_topic_suggestions(user_preferences)
     else:
-        await update.message.reply_text("Sepertinya saya tidak tahu jawaban untuk itu. Namun, saya akan berusaha belajar dari Anda.")
-        context.user_data['learning_query'] = user_query
-
-async def handle_learning(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle learning from user input with feedback."""
-    if 'learning_query' in context.user_data:
-        user_query = context.user_data['learning_query']
-        user_answer = update.message.text
-
-        await update.message.reply_text(f"Apakah jawaban ini benar? (Ya/Tidak): {user_answer}")
-
-        context.user_data['user_answer'] = user_answer
-        context.user_data['expected_answer'] = user_query  # Save the original question
+        topic_suggestions = generate_topic_suggestions()
+        
+    await update.message.reply_text(f"Coba diskusikan topik ini: {', '.join(topic_suggestions)}")
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle user feedback on answers."""
-    if 'user_answer' in context.user_data and 'expected_answer' in context.user_data:
-        feedback = update.message.text.lower().strip()
-        if feedback in ["ya", "tidak"]:
-            user_query = context.user_data['expected_answer']
-            user_answer = context.user_data['user_answer']
-
-            if feedback == "ya":
-                if user_query in qa_model:
-                    qa_model[user_query].append(user_answer)
-                else:
-                    qa_model[user_query] = [user_answer]
-                await save_model(QA_MODEL_FILE, qa_model)
-                await update.message.reply_text("Saya telah belajar tentang: " + user_query + ". Terima kasih!")
-            else:
-                await update.message.reply_text("Terima kasih atas feedback! Saya akan berusaha lebih baik.")
-            del context.user_data['user_answer']
-            del context.user_data['expected_answer']
+    feedback = update.message.text.lower().strip()
+    if feedback in ["ya", "tidak"]:
+        if feedback == "ya":
+            await update.message.reply_text("Terima kasih atas feedback! Saya senang jawaban saya membantu. 😊")
         else:
-            await update.message.reply_text("Silakan jawab dengan 'Ya' atau 'Tidak'.")
+            last_query = context.user_data.get('last_query', "pertanyaan yang Anda ajukan")
+            await update.message.reply_text(f"Maaf jika jawaban saya tidak membantu untuk '{last_query}'. Saya akan berusaha lebih baik. 😊")
     else:
-        await update.message.reply_text("Saya belum meminta feedback.")
-
-async def provide_advice(user_query: str) -> str:
-    """Provide advice based on user query."""
-    for keyword, advice in advice_model.items():
-        if keyword in user_query:
-            return advice
-    return "Saya tidak memiliki saran untuk itu. Namun, saya akan berusaha belajar lebih banyak."
-
-async def handle_advice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle requests for advice."""
-    user_query = update.message.text.lower().strip()
-    advice = await provide_advice(user_query)
-    await update.message.reply_text(advice)
+        await update.message.reply_text("Silakan jawab dengan 'ya' atau 'tidak'.")
 
 async def send_voice_response(update: Update, text: str) -> None:
-    """Send a voice response to the user."""
     voice_file = "voice_response.ogg"
     try:
-        text_to_speak = re.sub(r'http\S+|www\S+|https\S+', '', text).strip()
-        if not text_to_speak:
-            return
-        tts = gTTS(text=text_to_speak, lang='id')
+        tts = gTTS(text=text, lang='id')
         tts.save(voice_file)
         with open(voice_file, 'rb') as voice:
             await update.message.reply_voice(voice=voice)
     except Exception as e:
-        logger.error(f"Error sending voice message: {e}")
+        logger.error(f"Kesalahan mengirim pesan suara: {e}")
     finally:
         if os.path.exists(voice_file):
             os.remove(voice_file)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler."""
     keyboard = [
         [KeyboardButton("/help"), KeyboardButton("/about")],
-        [KeyboardButton("/feedback")]
+        [KeyboardButton("/feedback"), KeyboardButton("/topics")]
     ]
     
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
@@ -284,27 +306,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_voice_response(update, WELCOME_TEXT)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Help command handler."""
     await update.message.reply_text(HELP_TEXT)
     await send_voice_response(update, HELP_TEXT)
 
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """About command handler."""
-    await update.message.reply_text(ABOUT_TEXT)
-    await send_voice_response(update, ABOUT_TEXT)
+    await update.message.reply_text(ABOUT_BOT)
+    await send_voice_response(update, ABOUT_BOT)
+
+async def suggest_topics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    topics = [data["query"] for data in training_data]
+    if topics:
+        await update.message.reply_text("Topik yang sudah dibahas: " + ", ".join(topics))
+    else:
+        await update.message.reply_text("Belum ada topik yang dibahas.")
+
+async def periodic_training():
+    while True:
+        await asyncio.sleep(3600)
+        await train_model()
 
 def main() -> None:
-    """Main entry point for the bot."""
+    global models, vectorizers
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Create an event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Load models in the loop
+    loop.run_until_complete(load_models())
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about_command))
     application.add_handler(CommandHandler("feedback", handle_feedback))
+    application.add_handler(CommandHandler("topics", suggest_topics))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_query))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_learning))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_advice))
+
+    # Create periodic training task
+    loop.create_task(periodic_training())
 
     application.run_polling()
 
 if __name__ == '__main__':
     main()
+
