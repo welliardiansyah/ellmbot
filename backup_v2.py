@@ -17,7 +17,6 @@ import random
 
 load_dotenv()
 
-# Constants
 WELCOME_TEXT = "Selamat datang! Kirim pesan untuk memulai percakapan. 😊"
 HELP_TEXT = "/start - Memulai percakapan\n/help - Menampilkan daftar perintah\n/about - Informasi tentang bot\n/feedback - Kirim feedback\n/topics - Lihat topik yang sudah dibahas"
 ABOUT_BOT = "Saya adalah bot yang dirancang untuk membantu Anda dengan berbagai pertanyaan. 🤖"
@@ -28,11 +27,9 @@ TRAINING_DATA_FILE = "training_data.json"
 BING_API_KEY = os.getenv("BING_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Logging setup
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variables
 responses = {}
 filter_words = []
 user_context = {}
@@ -40,13 +37,15 @@ training_data = []
 models = {}
 vectorizers = {}
 
-# Load data functions
 def load_responses():
     if os.path.exists(RESPONSE_MODEL_FILE):
         with open(RESPONSE_MODEL_FILE, "r", encoding='utf-8') as f:
             data = f.read().strip()
-            return json.loads(data) if data else {}
+            if data:
+                return json.loads(data)
     return {}
+
+responses = load_responses()
 
 def load_filter_words():
     if os.path.exists(FILTER_WORDS_FILE):
@@ -54,21 +53,20 @@ def load_filter_words():
             return json.load(f)
     return []
 
+filter_words = load_filter_words()
+
 def load_training_data():
     if os.path.exists(TRAINING_DATA_FILE):
         with open(TRAINING_DATA_FILE, "r", encoding='utf-8') as f:
             return json.load(f)
     return []
 
-responses = load_responses()
-filter_words = load_filter_words()
 training_data = load_training_data()
 
 def save_training_data():
     with open(TRAINING_DATA_FILE, "w", encoding='utf-8') as f:
         json.dump(training_data, f, ensure_ascii=False, indent=4)
 
-# Helper functions
 def contains_filtered_words(text: str) -> bool:
     return any(word in text for word in filter_words)
 
@@ -148,7 +146,7 @@ async def train_model():
             'naive_bayes': MultinomialNB(),
             'logistic_regression': LogisticRegression(max_iter=1000)
         }
-
+        
         for model_name, model in models.items():
             model.fit(X, y)
             with open(f"{model_name}.pkl", "wb") as model_file:
@@ -160,7 +158,7 @@ async def load_models():
     global models, vectorizers
     models = {}
     vectorizers = {}
-
+    
     for model_name in ['naive_bayes', 'logistic_regression']:
         with open(f"{model_name}.pkl", "rb") as model_file:
             models[model_name] = pickle.load(model_file)
@@ -180,39 +178,43 @@ def generate_follow_up_question(user_query: str) -> str:
 
 def generate_topic_suggestions() -> list:
     topics = [
-        "Kesehatan mental", "Inovasi teknologi", "Seni dan budaya", "Perubahan iklim",
-        "Sejarah dunia", "Pendidikan di era digital", "Ekonomi global",
-        "Olahraga dan kebugaran", "Wisata dan petualangan", "Makanan dan kuliner",
-        "Kecerdasan buatan", "Etika dalam teknologi", "Tren mode saat ini",
-        "Masyarakat dan budaya", "Literatur klasik"
+        "Kesehatan mental",
+        "Inovasi teknologi",
+        "Seni dan budaya",
+        "Perubahan iklim",
+        "Sejarah dunia",
+        "Pendidikan di era digital",
+        "Ekonomi global",
+        "Olahraga dan kebugaran",
+        "Wisata dan petualangan",
+        "Makanan dan kuliner",
+        "Kecerdasan buatan",
+        "Etika dalam teknologi",
+        "Tren mode saat ini",
+        "Masyarakat dan budaya",
+        "Literatur klasik"
     ]
     return random.sample(topics, 3)
 
 def generate_custom_topic_suggestions(user_preferences: list) -> list:
     available_topics = [
-        "Kesehatan mental", "Inovasi teknologi", "Seni dan budaya", "Perubahan iklim",
-        "Sejarah dunia", "Pendidikan di era digital", "Ekonomi global",
-        "Olahraga dan kebugaran", "Wisata dan petualangan", "Makanan dan kuliner",
-        "Kecerdasan buatan", "Etika dalam teknologi", "Tren mode saat ini",
-        "Masyarakat dan budaya", "Literatur klasik"
+        "Kesehatan mental",
+        "Inovasi teknologi",
+        "Seni dan budaya",
+        "Perubahan iklim",
+        "Sejarah dunia",
+        "Pendidikan di era digital",
+        "Ekonomi global",
+        "Olahraga dan kebugaran",
+        "Wisata dan petualangan",
+        "Makanan dan kuliner",
+        "Kecerdasan buatan",
+        "Etika dalam teknologi",
+        "Tren mode saat ini",
+        "Masyarakat dan budaya",
+        "Literatur klasik"
     ]
     return random.sample([topic for topic in available_topics if topic in user_preferences], 3)
-
-async def send_voice_response(update: Update, text: str) -> None:
-    voice_file = "voice_response.ogg"
-    try:
-        # Cek apakah file sudah ada
-        if not os.path.exists(voice_file):
-            tts = gTTS(text=text, lang='id')
-            tts.save(voice_file)
-
-        with open(voice_file, 'rb') as voice:
-            await update.message.reply_voice(voice=voice)
-    except Exception as e:
-        logger.error(f"Kesalahan mengirim pesan suara: {e}")
-    finally:
-        if os.path.exists(voice_file):
-            os.remove(voice_file) 
 
 async def handle_user_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_query = update.message.text.lower().strip()
@@ -223,7 +225,6 @@ async def handle_user_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     response = None
 
-    # Handle specific queries
     if re.match(r'^[\d\s+\-*/().]+$', user_query):
         response = await calculate(user_query)
     elif "siapa kamu" in user_query or "apa itu" in user_query:
@@ -256,7 +257,6 @@ async def handle_user_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             response = "Maaf, saya tidak tahu jawaban untuk itu. Bisakah Anda memberi tahu saya lebih lanjut?"
 
     await update.message.reply_text(f"\n{response}")
-    await send_voice_response(update, response)  # Kirim suara untuk response
     follow_up_question = generate_follow_up_question(user_query)
     if follow_up_question:
         await update.message.reply_text(follow_up_question)
@@ -280,6 +280,19 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text(f"Maaf jika jawaban saya tidak membantu untuk '{last_query}'. Saya akan berusaha lebih baik. 😊")
     else:
         await update.message.reply_text("Silakan jawab dengan 'ya' atau 'tidak'.")
+
+async def send_voice_response(update: Update, text: str) -> None:
+    voice_file = "voice_response.ogg"
+    try:
+        tts = gTTS(text=text, lang='id')
+        tts.save(voice_file)
+        with open(voice_file, 'rb') as voice:
+            await update.message.reply_voice(voice=voice)
+    except Exception as e:
+        logger.error(f"Kesalahan mengirim pesan suara: {e}")
+    finally:
+        if os.path.exists(voice_file):
+            os.remove(voice_file)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
@@ -309,19 +322,20 @@ async def suggest_topics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def periodic_training():
     while True:
-        await asyncio.sleep(3600)  # Wait for an hour
+        await asyncio.sleep(3600)
         await train_model()
 
 def main() -> None:
     global models, vectorizers
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Load models
+    # Create an event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    # Load models in the loop
     loop.run_until_complete(load_models())
 
-    # Set up handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about_command))
@@ -336,3 +350,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
