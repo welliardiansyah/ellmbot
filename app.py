@@ -40,7 +40,10 @@ training_data = []
 models = {}
 vectorizers = {}
 
-# Load data functions
+def get_current_time_indonesia():
+    indonesian_timezone = pytz.timezone('Asia/Jakarta')
+    return datetime.now(indonesian_timezone).strftime('%Y-%m-%d %H:%M:%S')
+
 def load_responses():
     if os.path.exists(RESPONSE_MODEL_FILE):
         with open(RESPONSE_MODEL_FILE, "r", encoding='utf-8') as f:
